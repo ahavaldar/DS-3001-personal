@@ -1,0 +1,166 @@
+---
+title: "week06lab_votes"
+author: "Akhil Havaldar"
+date: "10/10/2021"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(plotly)
+library(htmltools)
+library(devtools)
+library(caret)
+library(NbClust)
+```
+
+
+```{r}
+#Select the variables to be included in the cluster 
+house_votes_rep <- read_csv("C:/Users/a8hav/Downloads/house_votes_Rep1.csv")
+
+clust_data_rep = house_votes_rep[, c("aye", "nay", "other")]
+View(clust_data_rep)
+```
+
+```{r}
+#Run the clustering algo with 2 centers
+
+kmeans_obj_rep = kmeans(clust_data_rep, centers = 2, 
+                        algorithm = "Lloyd")
+```
+
+```{r}
+#View the results
+
+kmeans_obj_rep
+head(kmeans_obj_rep)
+```
+
+```{r}
+#Visualize the output
+kmeans_obj_rep$cluster
+  
+party_clusters_rep = as.factor(kmeans_obj_rep$cluster)
+
+ggplot(house_votes_rep, aes(x = aye, 
+                            y = nay,
+                            shape = party_clusters_rep)) + 
+  geom_point(size = 6) +
+  ggtitle("Aye vs. Nay votes for Republican-introduced bills") +
+  xlab("Number of Aye Votes") +
+  ylab("Number of Nay Votes") +
+  scale_shape_manual(name = "Cluster", 
+                     labels = c("Cluster 1", "Cluster 2"),
+                     values = c("1", "2")) +
+  theme_light()
+
+ggplot(house_votes_rep, aes(x = aye, 
+                            y = nay,
+                            color = party.labels,  
+                            shape = party_clusters_rep)) + 
+  geom_point(size = 6) +
+  ggtitle("Aye vs. Nay votes for Republican-introduced bills") +
+  xlab("Number of Aye Votes") +
+  ylab("Number of Nay Votes") +
+  scale_shape_manual(name = "Cluster", 
+                     labels = c("Cluster 1", "Cluster 2"),
+                     values = c("1", "2")) +
+  scale_color_manual(name = "Party",
+                     labels = c("Republican", "Democratic"),
+                     values = c("red", "blue")) +
+  theme_light()
+
+```
+
+```{r}
+#Evaluate the quality of the clustering 
+num_rep = kmeans_obj_rep$betweenss
+denom_rep = kmeans_obj_rep$totss
+(var_exp_rep = num_rep / denom_rep)
+```
+
+```{r}
+#Use the function we created to evaluate several different number of clusters
+
+explained_variance = function(data_in, k){
+  set.seed(1)
+  kmeans_obj = kmeans(data_in, centers = k, algorithm = "Lloyd", iter.max = 30)
+  
+  var_exp = kmeans_obj$betweenss / kmeans_obj$totss
+  var_exp  
+}
+
+explained_var_rep = sapply(1:10, explained_variance, data_in = clust_data_rep)
+
+elbow_data_rep = data.frame(k = 1:10, explained_var_rep)
+
+```
+
+```{r}
+#Create a elbow chart of the output 
+ggplot(elbow_data_rep, 
+       aes(x = k,  
+           y = explained_var_rep)) + 
+  geom_point(size = 4) +           
+  geom_line(size = 1) +            
+  xlab('k') + 
+  ylab('Inter-cluster Variance / Total Variance') + 
+  theme_light()
+```
+
+```{r}
+#Use NbClust to select a number of clusters
+library(NbClust)
+(nbclust_obj_rep = NbClust(data = clust_data_rep, method = "kmeans"))
+View(nbclust_obj_rep$Best.nc)
+
+freq_k_rep = nbclust_obj_rep$Best.nc[1,]
+freq_k_rep = data.frame(freq_k_rep)
+View(freq_k_rep)
+
+```
+
+```{r}
+#Display the results visually 
+ggplot(freq_k_rep,
+       aes(x = freq_k_rep)) +
+  geom_bar() +
+  scale_x_continuous(breaks = seq(0, 15, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 12, by = 1)) +
+  labs(x = "Number of Clusters",
+       y = "Number of Votes",
+       title = "Cluster Analysis")
+```
+
+```{r}
+#Using the recommended number of cluster compare the quality of the model 
+#with 2 clusters
+
+# Comparing the results from nbclust and the elbow output, we can see that both methods recommend using 2 clusters for the data. In addition, the next best recommended number of clusters is 3 for both. For the elbow method, there seems to be a slight jump in variance which is more than any of the other jumps, and for nbclust it is the 2nd highest recommended number of clusters produced from the algorithm. 
+```
+
+
+```{r}
+#Bonus: Create a 3d version of the output
+party_color3D_rep = data.frame(party.labels = c("Democrat", "Republican"),
+                               color = c("blue", "red"))
+house_votes_color_rep = inner_join(house_votes_rep, party_color3D_rep)
+
+house_votes_color_rep$clusters <- (party_clusters_rep) 
+house_votes_color_rep$Last.Name <- gsub("[^[:alnum:]]", "", house_votes_color_rep$Last.Name)
+
+fig <- plot_ly(house_votes_color_rep, 
+               type = "scatter3d",
+               mode="markers",
+               symbol = ~clusters,
+               x = ~aye, 
+               y = ~nay, 
+               z = ~other,
+               color = ~color,
+               colors = c('#0C4B8E','#BF382A'), 
+               text = ~paste('Representative:',Last.Name,
+                             "Party:",party.labels))
+
+
+fig
+```

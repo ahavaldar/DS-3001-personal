@@ -1,0 +1,498 @@
+---
+title: "MLpipeline_week05lab"
+author: "Akhil Havaldar"
+date: "9/25/2021"
+output:
+  html_document:
+    toc: TRUE
+    theme: journal
+    toc_float: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(psych)
+library(mltools)
+library(data.table)
+library(caret)
+```
+
+## DATASET 1
+
+# Phase 1
+[Fifa_22_data](https://www.kaggle.com/cashncarry/fifa-22-complete-player-dataset/version/1)
+```{r}
+# Building a model to predict the rating of a set of positions in FIFA 22.
+
+# Independent Business Metric - Can we predict which players will be used the most in the game based on their rating?
+```
+
+## Phase 2
+```{r}
+# Dropping columns not needed
+fifa <- read_csv("C:/Users/a8hav/Downloads/players_fifa22.csv/players_fifa22.csv")
+fifa2 <- fifa[,-c(1,3:8,10:14,16:33,40:90)]
+attach(fifa2)
+
+# Collapsing Position Column
+fifa2$BestPosition <- fct_collapse(fifa2$BestPosition,
+                                   att = c("ST","LW", "RW","CF"), 
+                                   mid = c("CAM","CDM","CM","LM","RM"),
+                                   def = c("CB","LB","RB", "LWB", "RWB"),
+                                   gk = "GK")
+
+# Normalize function
+normalize <- function(x){
+ (x - min(x)) / (max(x) - min(x))
+}
+
+abc <- names(select_if(fifa2, is.numeric))
+fifa2[abc] <- as_tibble(lapply(fifa2[abc], normalize))
+
+str(fifa2)
+
+# One hot encoding
+fifa_1h <- one_hot(as.data.table(fifa2),cols = "auto",sparsifyNAs = TRUE,naCols = TRUE,dropCols = TRUE,dropUnusedLevels = TRUE) 
+View(fifa_1h)
+
+# Baseline/Prevalence
+describe(fifa_1h$Overall)
+(box <- boxplot(fifa_1h$Overall, horizontal = TRUE)) 
+box$stats
+fivenum(fifa_1h$Overall)
+
+fifa_1h$Overall_f <- cut(fifa_1h$Overall, c(-1, .50, 1), labels = c(0,1))
+
+prevalence <- table(fifa_1h$Overall_f)[[2]]/length(fifa_1h$Overall_f)
+
+
+# Initial Model Building
+fifa_dt <- fifa_1h[,-c("Overall","Name")]
+view(fifa_dt)
+
+part_index_1 <- caret::createDataPartition(fifa_dt$Overall_f,
+                                           times=1,
+                                           p = 0.70,
+                                           groups=1,
+                                           list=FALSE)
+View(part_index_1)
+dim(cereal_dt)
+
+train <- fifa_dt[part_index_1,]
+tune_and_test <- fifa_dt[-part_index_1, ]
+
+tune_and_test_index <- createDataPartition(tune_and_test$Overall_f,
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]
+test <- tune_and_test[-tune_and_test_index, ]
+
+dim(train)
+dim(tune)
+dim(test)
+
+
+# Cross Validation
+fitControl <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 5, 
+                          returnResamp="all") 
+
+# Training and Evaluation
+features <- train[,-"Overall_f"]
+target <- train[,"Overall_f"]
+
+set.seed(1984)
+fifa_mdl <- train(x=features,
+                y=target$Overall_f,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+fifa_mdl
+
+# Tune and Evaluation 
+fifa_predict = predict(fifa_mdl,tune,type= "raw")
+
+confusionMatrix(as.factor(fifa_predict), 
+                as.factor(tune$Overall_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+varImp(fifa_mdl)
+
+plot(fifa_mdl)
+
+grid <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(20,30,40), 
+                    .model=c("tree","rules"))
+set.seed(1984)
+fifa_mdl_tune <- train(x=features,
+                y=target$Overall_f,
+                tuneGrid=grid,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+fifa_mdl_tune
+fifa_mdl
+
+plot(fifa_mdl_tune)
+
+fifa_predict_tune = predict(fifa_mdl_tune,tune,type= "raw")
+
+confusionMatrix(as.factor(fifa_predict_tune), 
+                as.factor(tune$Overall_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+# Test
+fifa_predict_test = predict(fifa_mdl_tune,test,type= "raw")
+fifa_predict_test
+tune$Overall_f
+
+confusionMatrix(as.factor(fifa_predict_test), 
+                as.factor(tune$Overall_f[1:2886]), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+```
+```{r}
+# Summary of Findings
+# After running both models, I found that via the confusion matrices that the test resulted in 98% accuracy while the tuning resulted in 95% accuracy. I was initially surprised by the very high accuracy in the tuning part, but after testing the data I realized that my model is quite accurate. With regards to variable importance, the variable measures that I thought would have an influence on the Overall of a player (defending, dribbling, passing, shooting, physicality, and pace), had a 100 influence on the model, which makes me even more confident about my model. Before I started I was not sure if using just the totals of the variables would be sufficient to predict the overall of a player, however it seems that they actually play a really important role in determining the overall of a player.
+```
+
+
+## Data Set 2
+
+# Phase 1
+[wine_data](https://www.kaggle.com/brynja/wineuci)
+```{r}
+# Building a model to predict the alcohol content per category of wine. 
+
+# Independent Business Metric -> After predicting the alcohol content, is there a way to determine if the alcohol content of a certain wine drives sales?
+```
+
+## Phase 2 
+```{r}
+wine <- read_csv("C:/Users/a8hav/Downloads/Wine.csv")
+# Renaming columns
+names(wine)[1] <- "Class"
+names(wine)[2] <- "Alcohol"
+names(wine)[3] <- "Malic Acid"
+names(wine)[4] <- "Ash"
+names(wine)[5] <- "Alcalinity of ash"
+names(wine)[6] <- "Magnesium"
+names(wine)[7] <- "Total phenols"
+names(wine)[8] <- "Flavanoids"
+names(wine)[9] <- "Nonflavanoid phenols"
+names(wine)[10] <- "Proanthocyanins"
+names(wine)[11] <- "Color intensity"
+names(wine)[12] <- "Hue"
+names(wine)[13] <- "OD280/OD315 of diluted wines"
+names(wine)[14] <- "Proline"
+attach(wine)
+
+# Convert to Factor
+wine[,1] <- lapply(wine[,1], as.factor)
+
+
+# Normalize Function
+
+normalize <- function(x){
+ (x - min(x)) / (max(x) - min(x))
+}
+
+abc2 <- names(select_if(wine, is.numeric))
+wine[abc2] <- as_tibble(lapply(wine[abc2], normalize))
+
+str(wine)
+
+# One hot encoding
+wine_1h <- one_hot(as.data.table(wine),cols = "auto",sparsifyNAs = TRUE,naCols = TRUE,dropCols = TRUE,dropUnusedLevels = TRUE) 
+View(wine_1h)
+
+# Baseline/Prevalence
+describe(wine_1h$Alcohol)
+(box <- boxplot(wine_1h$Alcohol, horizontal = TRUE)) 
+box$stats
+fivenum(wine_1h$Alcohol)
+
+wine_1h$Alcohol_f <- cut(wine_1h$Alcohol, c(-1, .69, 1), labels = c(0,1))
+
+prevalence <- table(wine_1h$Alcohol_f)[[2]]/length(wine_1h$Alcohol_f)
+
+# Initial Model Building
+wine_dt <- wine_1h[,-c("Alcohol")]
+
+part_index_1 <- caret::createDataPartition(wine_dt$Alcohol_f,
+                                           times=1,
+                                           p = 0.70,
+                                           groups=1,
+                                           list=FALSE)
+View(part_index_1)
+dim(wine_dt)
+
+train <- wine_dt[part_index_1,]
+tune_and_test <- wine_dt[-part_index_1, ]
+
+tune_and_test_index <- createDataPartition(tune_and_test$Alcohol_f,
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]
+test <- tune_and_test[-tune_and_test_index, ]
+
+dim(train)
+dim(tune)
+dim(test)
+
+
+# Cross Validation
+fitControl <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 5, 
+                          returnResamp="all",
+                          savePredictions = 'final') 
+
+
+# Training and Evaluation
+features <- train[,-"Alcohol_f"]
+target <- train[,"Alcohol_f"]
+
+View(target)
+
+str(features)
+
+set.seed(1984)
+wine_mdl <- train(x=features,
+                y=target$Alcohol_f,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+wine_mdl
+
+# Tune and Evaluation
+wine_predict = predict(wine_mdl,tune,type= "raw")
+
+confusionMatrix(as.factor(wine_predict), 
+                as.factor(tune$Alcohol_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+varImp(wine_mdl)
+
+plot(wine_mdl)
+
+
+grid <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(20,30,40), 
+                    .model=c("tree","rules"))
+set.seed(1984)
+wine_mdl_tune <- train(x=features,
+                y=target$Alcohol_f,
+                tuneGrid=grid,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+wine_mdl_tune
+wine_mdl
+
+plot(wine_mdl_tune)
+
+wine_predict_tune = predict(wine_mdl_tune,tune,type= "raw")
+
+wine_predict_tune
+confusionMatrix(as.factor(wine_predict_tune), 
+                as.factor(tune$Alcohol_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+# Test
+wine_predict_test = predict(wine_mdl_tune,test,type= "raw")
+wine_predict_test
+tune$Alcohol_f
+confusionMatrix(as.factor(wine_predict_test), 
+                as.factor(tune$Alcohol_f[1:25]), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+```
+
+
+```{r}
+# Summary of Findings
+# After developing the models, I found that my tuning data resulted in 88.9% accuracy and my testing data resulted in 81.5% accuracy. From these results, it seems like my model is not as accurate as it could be. The drop off in accuracy tells me that I could possibly have a too small of a data set to conduct the tests. In addition to the subpar accuracy, the variable importance measures seem very skewed. I get a 100 for proline and 70.59 for color intensity, but that is all. Since none of the others have importance, I now wonder if building this model was worth it. This is the main concern I have with the model. I do not think it is good enough to accurately predict the wine alcohol level. Moving forward, I think it would be better suited to either try and predict another variable, or try to find more data on wine characteristics. 
+```
+
+## DATASET 3
+
+## Phase 1
+[Beer](https://www.kaggle.com/jtrofe/beer-recipes?search=beer+prices&select=recipeData.csv)
+```{r}
+# Find a model that predicts the ABV of a beer based on the different brewing method
+
+# Independent Business Metric -> Which brewing method produces the most ABV, and does this help drive sales?
+```
+
+## Phase 2
+```{r}
+# Scale, Center, Normalizing
+
+beer <- read_csv("C:/Users/a8hav/Downloads/recipeData.csv/recipeData.csv")
+
+# Removing unnecessary columns
+beer <- beer[,-c(1:6,14:17,19:23)]
+attach(beer)
+
+beer$BrewMethod <- fct_collapse(beer$BrewMethod,
+                           AG="A", 
+                           E="e",
+                        BIAB = "B",
+                        PM = "P"
+                        )
+
+abc3 <- names(select_if(beer, is.numeric))
+
+# Normalize
+normalize <- function(x){
+ (x - min(x)) / (max(x) - min(x))
+}
+
+beer[abc3] <- as_tibble(lapply(beer[abc3], normalize))
+
+# One Hot Encoding
+beer_1h <- one_hot(as.data.table(beer),cols = "auto",sparsifyNAs = TRUE,naCols = TRUE,dropCols = TRUE,dropUnusedLevels = TRUE) 
+View(beer_1h)
+
+# Baseline/Prevalence
+describe(beer_1h$ABV)
+(box <- boxplot(beer_1h$ABV, horizontal = TRUE)) 
+box$stats
+fivenum(beer_1h$ABV)
+
+beer_1h$ABV_f <- cut(beer_1h$ABV, c(-1, .12, 1), labels = c(0,1))
+
+prevalence <- table(beer_1h$ABV_f)[[2]]/length(beer_1h$ABV_f)
+
+
+# Initial Model Building
+beer_dt <- beer_1h[,-c("ABV")]
+view(beer_dt)
+
+part_index_1 <- caret::createDataPartition(beer_dt$ABV_f,
+                                           times=1,
+                                           p = 0.70,
+                                           groups=1,
+                                           list=FALSE)
+View(part_index_1)
+dim(beer_dt)
+
+train <- beer_dt[part_index_1,]
+tune_and_test <- beer_dt[-part_index_1, ]
+
+
+tune_and_test_index <- createDataPartition(tune_and_test$ABV_f,
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]
+test <- tune_and_test[-tune_and_test_index, ]
+
+dim(train)
+dim(tune)
+dim(test)
+
+# Cross Validation
+fitControl <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 5, 
+                          returnResamp="all",
+                          savePredictions = 'final') 
+
+
+# Training and Evaluation
+features <- train[,-"ABV_f"]
+target <- train[,"ABV_f"]
+
+View(target)
+
+str(features)
+
+set.seed(1984)
+beer_mdl <- train(x=features,
+                y=target$ABV_f,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+beer_mdl
+
+# Tune and Evaluation
+beer_predict = predict(beer_mdl,tune,type= "raw")
+
+beer_predict
+tune$ABV_f
+
+confusionMatrix(as.factor(beer_predict), 
+                as.factor(tune$ABV_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+varImp(beer_mdl)
+
+plot(beer_mdl)
+
+
+grid <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(20,30,40), 
+                    .model=c("tree","rules"))
+set.seed(1984)
+beer_mdl_tune <- train(x=features,
+                y=target$ABV_f,
+                tuneGrid=grid,
+                trControl=fitControl,
+                method="C5.0",
+                verbose=TRUE)
+
+# NOTE: Both these models took over an hour to generate. 
+# I assume it is because of the very large data set.
+
+beer_mdl_tune
+beer_mdl
+
+plot(beer_mdl_tune)
+
+
+beer_predict_tune = predict(beer_mdl_tune,tune,type= "raw")
+
+beer_predict_tune
+
+confusionMatrix(as.factor(beer_predict_tune), 
+                as.factor(tune$ABV_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+
+# Test
+beer_predict_test = predict(beer_mdl_tune,test,type= "raw")
+
+confusionMatrix(as.factor(beer_predict_test), 
+                as.factor(tune$ABV_f), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+```
+```{r}
+# Summary of Findings
+# To start off, the model building process took quite a long time. I believe this is due to the amount of data in the dataset, but it may be from other factors as well. I found that my tune had a 97% accuracy, and my test had a 97.5% accuracy. These were very good results for the data as this means a sufficient model was built to correctly identify the beer ABV. The variable importance of the measures were also all generally spread out and accounted for in some way which was promising to see. I did not really think any of the variables would be a good predictor for beer ABV, but after building the models I can say that this model was worth building and yielded very high results. However, moving forward, I would like to find a better way to run these models with very large datasets without R taking over an hour to generate the model. 
+```
+

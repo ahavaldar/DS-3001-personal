@@ -1,0 +1,311 @@
+---
+title: "week12_randomforest_lab"
+author: "Akhil Havaldar"
+date: "11/23/2021"
+output: 
+  html_document:
+    toc: TRUE
+    theme: readable
+    toc_float: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include=FALSE}
+library(rio)
+library(plyr)
+library(tidyverse)
+library(rpart)
+library(psych)
+library(pROC)
+library(rpart.plot)
+library(rattle)
+library(caret)
+library(C50) 
+library(mlbench)
+library(ROCR)
+library(data.table)
+library(randomForest)
+library(mltools)
+```
+
+```{r, include=FALSE}
+### Reading in data
+
+url <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+
+data <- readr::read_csv(url, col_name=FALSE)
+
+names <- c("age","workclass","fnlwgt","education","education-num","marital-status","occupation","relationship","race","sex","capital-gain","capital-loss","hours-per-week","native-country", "salary")
+names(data) <- names
+
+```
+
+```{r, include=FALSE}
+### Recoding salary variable
+
+data$salary <- fct_collapse(data$salary,
+                            less_50k = "<=50K",
+                            more_50k = ">50K")
+
+data$salary <- recode(data$salary,
+                       'less_50k'=0,'more_50k'=1)
+```
+
+```{r, include=FALSE}
+### Removing unnecessary columns
+data <- data[,-c(3,5,8,11,12)]
+
+table(data$workclass)
+data$workclass <- fct_collapse(data$workclass, 
+                               gov = c("Federal-gov", "Local-gov",
+                                       "State-gov"),
+                               private = c("Private", "Self-emp-inc",
+                                           "Self-emp-not-inc"), 
+                               other = c("?", "Never-worked",
+                                         "Without-pay"))
+
+### Collapsing the education variable
+table(data$education)
+data$education <- fct_collapse(data$education,
+                               HS_below = c("10th", "11th", "12th",
+                                            "1st-4th", "5th-6th",
+                                            "7th-8th", "9th",
+                                            "Preschool"), 
+                               HS_grad = "HS-grad",
+                               College = c("Assoc-acdm", "Assoc-voc",
+                                           "Bachelors","Some-college"),
+                               Post_college = c("Doctorate","Masters",
+                                                "Prof-school"))
+
+
+### Collapsing the marital status variable
+table(data$`marital-status`)
+colnames(data)[4] <- "marital_status"
+data$marital_status <- fct_collapse(data$marital_status,
+                                      married = c("Married-AF-spouse",
+                                                  "Married-civ-spouse",
+                                                  "Married-spouse-absent"
+                                                  ),
+                                      not_married = c("Divorced",
+                                                      "Never-married",
+                                                      "Separated",
+                                                      "Widowed"))
+
+### Collapsing the occupation variable
+table(data$occupation)
+data$occupation <- fct_collapse(data$occupation,
+                                white_collar = c("Adm-clerical",
+                                                 "Exec-managerial",
+                                                 "Prof-specialty",
+                                                 "Sales",
+                                                 "Tech-support"),
+                                blue_collar = c("Armed-Forces",
+                                                "Craft-repair",
+                                                "Farming-fishing",
+                                                "Handlers-cleaners",
+                                                "Machine-op-inspct",
+                                                "Priv-house-serv",
+                                                "Protective-serv",
+                                                "Transport-moving"),
+                                other = c("?","Other-service"))
+
+### Collapsing the race variable
+table(data$race)
+data$race <- fct_collapse(data$race,
+                          white = "White",
+                          black = "Black",
+                          other = c("Amer-Indian-Eskimo",
+                                    "Asian-Pac-Islander",
+                                    "Other"))
+
+### Collapsing the sex variable
+table(data$sex)
+data$sex <- fct_collapse(data$sex,
+                         female = "Female",
+                         male = "Male")
+
+### Collapsing the country variable
+colnames(data)[9] <- "country"
+table(data$country) 
+data$country <- fct_collapse(data$country, 
+                                    usa = "United-States",
+                                    other = c("?", "Cambodia", 
+                                              "Canada", "China",
+                                              "Columbia", "Cuba",
+                                              "Dominican-Republic",
+                                              "Ecuador",
+                                              "El-Salvador",
+                                              "England","France",
+                                              "Germany","Greece",
+                                              "Guatemala",
+                                              "Haiti",
+                                              "Holand-Netherlands",
+                                              "Honduras",
+                                              "Hong",
+                                              "Hungary",
+                                              "India",
+                                              "Iran","Ireland",
+                                              "Italy","Jamaica",
+                                              "Japan","Laos",
+                                              "Mexico",
+                                              "Nicaragua",
+                                              "Outlying-US(Guam-USVI-etc)",
+                                              "Peru",
+                                              "Philippines","Poland",
+                                              "Portugal",
+                                              "Puerto-Rico",
+                                              "Scotland","South",
+                                              "Taiwan","Thailand",
+                                              "Trinadad&Tobago",
+                                              "Vietnam","Yugoslavia"))
+
+colnames(data)[8] <- "hours"
+
+### Normalizing age and hours since the two ranges are different
+normalize <- function(x){
+ (x - min(x)) / (max(x) - min(x))
+}
+
+data$age <- normalize(data$age)
+data$hours <- normalize(data$hours)
+
+### One hot encoding
+data_1h <- one_hot(as.data.table(data),cols = "auto",sparsifyNAs = TRUE,naCols = TRUE,dropCols = TRUE,dropUnusedLevels = TRUE)
+
+data_1h$salary <- as.factor(data_1h$salary)
+```
+
+```{r, include=FALSE}
+### Creating Train, Test, Tune Data Sets
+
+### Need to partition 50,25,25 because any larger partition would make the model take around a day to run
+
+part_index_1 <- caret::createDataPartition(data_1h$salary,
+                                           times=1,
+                                           p = 0.50,
+                                           groups=1,
+                                           list=FALSE)
+
+train <- data_1h[part_index_1, ]
+tune_and_test <- data_1h[-part_index_1, ]
+
+
+tune_and_test_index <- createDataPartition(tune_and_test$salary,
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]
+test <- tune_and_test[-tune_and_test_index, ]
+
+
+dim(train)
+dim(test)
+dim(tune)
+```
+
+### Mtry Level
+```{r, echo=FALSE}
+### Calculating the mtry level
+
+mytry_tune <- function(x){
+  xx <- dim(x)[2]-1
+  sqrt(xx)
+}
+
+(mytry_tune(data_1h))
+```
+
+### Initial Model with 500 trees
+```{r, include=FALSE}
+### Running the initial training model with 500 trees
+
+memory.limit(size=56000)
+set.seed(2023)	
+salary_RF = randomForest(salary~.,          
+                            train,    
+                            ntree = 500,       
+                            mtry = 5,            
+                            replace = TRUE,     
+                            sampsize = 100,      
+                            nodesize = 5,       
+                            importance = TRUE,   
+                            proximity = TRUE,    
+                            norm.votes = TRUE,  
+                            do.trace = TRUE,     
+                            keep.forest = TRUE,  
+                            keep.inbag = TRUE)
+```
+
+```{r, echo=FALSE}
+salary_RF
+```
+
+### Different Models with Different Parameters
+```{r, include=FALSE}
+set.seed(2023)	
+salary_RF_2 = randomForest(salary~.,          
+                            tune,    
+                            ntree = 350,       
+                            mtry = 5,            
+                            replace = TRUE,     
+                            sampsize = 200,      
+                            nodesize = 5,       
+                            importance = TRUE,   
+                            proximity = TRUE,    
+                            norm.votes = TRUE,  
+                            do.trace = TRUE,     
+                            keep.forest = TRUE,  
+                            keep.inbag = TRUE)
+```
+
+```{r, echo=FALSE}
+salary_RF_2
+```
+
+```{r, include=FALSE}
+set.seed(2023)	
+salary_RF_3 = randomForest(salary~.,          
+                            tune,    
+                            ntree = 150,       
+                            mtry = 4,            
+                            replace = TRUE,     
+                            sampsize = 100,      
+                            nodesize = 5,       
+                            importance = TRUE,   
+                            proximity = TRUE,    
+                            norm.votes = TRUE,  
+                            do.trace = TRUE,     
+                            keep.forest = TRUE,  
+                            keep.inbag = TRUE)
+```
+
+```{r, echo=FALSE}
+salary_RF_3
+```
+
+### Final Evaluation with Test Data
+```{r, include=FALSE}
+set.seed(2023)	
+salary_RF_test = randomForest(salary~.,          
+                            test,    
+                            ntree = 200,       
+                            mtry = 4,            
+                            replace = TRUE,     
+                            sampsize = 100,      
+                            nodesize = 5,       
+                            importance = TRUE,   
+                            proximity = TRUE,    
+                            norm.votes = TRUE,  
+                            do.trace = TRUE,     
+                            keep.forest = TRUE,  
+                            keep.inbag = TRUE)
+```
+
+```{r, echo=FALSE}
+salary_RF_test
+```
+
+### Summary of Findings
+#### After running the model a few times with different options for tree size, sample size, and mtry I found the model that reduces class error rate by the most significant margin is a random forest with tree=200, sample size=100, and mtry=4. The 5% missclassification for less than $50k and 52% missclassification for more than $50k turns out to be one of the better results. Getting to this result took some time. When I first ran the model, I split the train, tune, and test data into 70, 15, 15. This resulted in the model taking 24 hours to finish running and resulted in a higher error rate. Once I divided the data into 50, 25, 25 the run time lowered to 25 minutes and produced better results. When compared to the c5.0 from last week, the results were very similar.  The accuracy of the model was more or less the same, with the random forest model producing a better prediction rate for less than $50k, while the c5.0 had a better prediction rate for more than $50k (the difference was basically negligible however). After running both c5.0 and random forest successfully, I realized that c5.0 is the much better choice to run with this type of data. Since the data was very large, random forest has a lot of data points to account for when building every tree since it is going row by row. Whereas in c5.0 this is not the case. With the final results being very similar, c5.0 is the better option, producing replicable results to random forest. Although, one good thing about running random forest in conjunction with c5.0 is that it validates the results, and shows us that the model can be replicable among different algorithms.  

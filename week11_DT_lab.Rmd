@@ -1,0 +1,374 @@
+---
+title: "week11_DT_lab"
+author: "Akhil Havaldar"
+date: "11/16/2021"
+output: 
+  html_document:
+    toc: TRUE
+    theme: readable
+    toc_float: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include=FALSE}
+# Libraries
+library(rio)
+library(plyr)
+library(tidyverse)
+library(rpart)
+library(psych)
+library(pROC)
+library(rpart.plot)
+library(rattle)
+library(caret)
+library(C50) 
+library(mlbench)
+library(ROCR)
+
+```
+
+
+```{r, include=FALSE}
+#1: LOADING DATA
+
+url <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+
+data <- readr::read_csv(url, col_name=FALSE)
+
+names <- c("age","workclass","fnlwgt","education","education-num","marital-status","occupation","relationship","race","sex","capital-gain","capital-loss","hours-per-week","native-country", "salary")
+names(data) <- names
+```
+
+```{r, include=FALSE}
+#2: DATA CLEANING
+
+### Collapsing the working class variable
+table(data$workclass)
+data$workclass <- fct_collapse(data$workclass, 
+                               gov = c("Federal-gov", "Local-gov",
+                                       "State-gov"),
+                               private = c("Private", "Self-emp-inc",
+                                           "Self-emp-not-inc"), 
+                               other = c("?", "Never-worked",
+                                         "Without-pay"))
+
+### Collapsing the education variable
+table(data$education)
+data$education <- fct_collapse(data$education,
+                               HS_below = c("10th", "11th", "12th",
+                                            "1st-4th", "5th-6th",
+                                            "7th-8th", "9th",
+                                            "Preschool"), 
+                               HS_grad = "HS-grad",
+                               College = c("Assoc-acdm", "Assoc-voc",
+                                           "Bachelors","Some-college"),
+                               Post_college = c("Doctorate","Masters",
+                                                "Prof-school"))
+
+### Removing unnecessary columns
+data <- data[,-c(5,8)]
+
+### Collapsing the marital status variable
+table(data$`marital-status`)
+data$`marital-status` <- fct_collapse(data$`marital-status`,
+                                      married = c("Married-AF-spouse",
+                                                  "Married-civ-spouse",
+                                                  "Married-spouse-absent"
+                                                  ),
+                                      not_married = c("Divorced",
+                                                      "Never-married",
+                                                      "Separated",
+                                                      "Widowed"))
+
+### Collapsing the occupation variable
+table(data$occupation)
+data$occupation <- fct_collapse(data$occupation,
+                                white_collar = c("Adm-clerical",
+                                                 "Exec-managerial",
+                                                 "Prof-specialty",
+                                                 "Sales",
+                                                 "Tech-support"),
+                                blue_collar = c("Armed-Forces",
+                                                "Craft-repair",
+                                                "Farming-fishing",
+                                                "Handlers-cleaners",
+                                                "Machine-op-inspct",
+                                                "Priv-house-serv",
+                                                "Protective-serv",
+                                                "Transport-moving"),
+                                other = c("?","Other-service"))
+
+### Collapsing the race variable
+table(data$race)
+data$race <- fct_collapse(data$race,
+                          white = "White",
+                          black = "Black",
+                          other = c("Amer-Indian-Eskimo",
+                                    "Asian-Pac-Islander",
+                                    "Other"))
+
+### Collapsing the sex variable
+table(data$sex)
+data$sex <- fct_collapse(data$sex,
+                         female = "Female",
+                         male = "Male")
+
+### Collapsing the country variable
+colnames(data)[12] <- "country"
+table(data$country) 
+data$country <- fct_collapse(data$country, 
+                                    usa = "United-States",
+                                    other = c("?", "Cambodia", 
+                                              "Canada", "China",
+                                              "Columbia", "Cuba",
+                                              "Dominican-Republic",
+                                              "Ecuador",
+                                              "El-Salvador",
+                                              "England","France",
+                                              "Germany","Greece",
+                                              "Guatemala",
+                                              "Haiti",
+                                              "Holand-Netherlands",
+                                              "Honduras",
+                                              "Hong",
+                                              "Hungary",
+                                              "India",
+                                              "Iran","Ireland",
+                                              "Italy","Jamaica",
+                                              "Japan","Laos",
+                                              "Mexico",
+                                              "Nicaragua",
+                                              "Outlying-US(Guam-USVI-etc)",
+                                              "Peru",
+                                              "Philippines","Poland",
+                                              "Portugal",
+                                              "Puerto-Rico",
+                                              "Scotland","South",
+                                              "Taiwan","Thailand",
+                                              "Trinadad&Tobago",
+                                              "Vietnam","Yugoslavia"))
+
+data <- data[,-c(9,10)]
+
+### Collapsing the salary variable
+table(data$salary)
+data$salary <- fct_collapse(data$salary,
+                            less_50k = "<=50K",
+                            more_50k = ">50K")
+```
+
+### Prevalence
+#### This table shows that the prevalence is 0.24. This means that randomly guessing would correctly assign a positive class 24% of the time.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+table(data$salary)
+```
+
+```{r, include=FALSE}
+### 6: Splitting the data
+part_index_1 <- caret::createDataPartition(data$salary,
+                                           times=1,
+                                           p = 0.70,
+                                           groups=1,
+                                           list=FALSE)
+
+train <- data[part_index_1, ]
+tune_and_test <- data[-part_index_1, ]
+
+
+tune_and_test_index <- createDataPartition(tune_and_test$salary,
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]
+test <- tune_and_test[-tune_and_test_index, ]
+
+
+dim(train)
+dim(test)
+dim(tune)
+
+```
+
+```{r, include=FALSE}
+#7: Model Building
+
+features <- train[,-11]
+target <- train$salary
+
+# Cross Validation
+fitControl <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 5, 
+                          returnResamp="all",
+                          classProbs = TRUE,
+                          allowParallel = TRUE)
+
+grid <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(1,5,10,15,20), 
+                    .model="tree")
+
+set.seed(1984)
+salary_mdl <- train(x=features,
+                y=target,
+                method="C5.0",
+                tuneGrid=grid,
+                trControl=fitControl,
+                verbose=TRUE)
+```
+
+### Result Interpretation
+#### The model uses occupation, education, marital-status, and age 100% of the time, making them the most important variables to the model. After that, work class and hrs per week have relatively high variable importance. Country is not used at all when making the model. This might be because an overwhelming majority of the dataset belongs to the USA.
+```{r, echo=FALSE}
+#8: Result Interpretation
+
+salary_mdl
+varImp(salary_mdl)
+
+```
+
+### Model Plot
+```{r, echo=FALSE}
+#9: Model Plot
+
+xyplot(salary_mdl,type = c("g", "p", "smooth"))
+
+```
+
+```{r, include=FALSE}
+#10: Prediction
+
+salary_pred_tune = predict(salary_mdl,tune, type= "raw")
+
+```
+
+### Confusion Matrix Interpretation
+#### The model boasts a very high accuracy and kappa value, which is a good sign that our model could be implemented. The sensitivity is also really high which is another good sign that the model could be useful. With a high sensitivity, the model accurately guesses true positives (workers earning less than $50,000) 92% of the time which is really good. On the other hand, the false positive rate (1-specificity) is not too good at 50%, but after looking through all the metrics, the high kappa value, and high sensitivity are the best metrics to use for analysis. This is backed again by the high accuracy rate of the model.
+```{r, echo=FALSE}
+#11: Confusion Matrix
+
+(salary_eval <- confusionMatrix(as.factor(salary_pred_tune), 
+                as.factor(tune$salary), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec"))
+```
+
+### ROC Curve
+#### The ROC output shows us that the model is actually pretty good in determining the TPR. It also proves that the model we developed could be implemented, with some restrictions. 
+```{r, include=FALSE}
+#13: ROC Curve
+
+salary_pred_tune_p = predict(salary_mdl,tune,type= "prob") 
+
+colnames(salary_pred_tune_p)[1] <- "0"
+colnames(salary_pred_tune_p)[2] <- "1"
+tune$salary <- recode(tune$salary,
+                       'less_50k'=0,'more_50k'=1)
+tune$salary <- as.factor(tune$salary)
+
+salary_pred_tune_p$salary <- tune$salary
+
+
+salary_pred <- prediction(salary_pred_tune_p$`1`, as.numeric(tune$salary))
+
+salary_tree_perf <- performance(salary_pred, "tpr", "fpr")
+
+```
+
+```{r, echo=FALSE}
+plot(salary_tree_perf, colorize=TRUE)
+```
+
+### Adjusting Threshold
+#### When I changed the threshold to the extremes of 0.3 and 0.8, accuracy and kappa dramatically decreased. This is because the threshold for classifying 0s and 1s is either too high or too low, so it will miss-classify a lot of the data points. 
+```{r, echo=FALSE}
+#14: Adjusting Threshold
+
+adjust_thres <- function(x, y, z) {
+  thres <- as.factor(ifelse(x > y, 0,1))
+  confusionMatrix(thres, z, positive = "1", dnn=c("Prediction", "Actual"), mode = "everything")
+}
+
+
+(adjust_thres(salary_pred_tune_p$`1`,.3, tune$salary))
+(adjust_thres(salary_pred_tune_p$`1`,.8, tune$salary))
+```
+
+### Multiple Model Results
+#### The quality of the model_2 decreases by around 5% when using optimism boot instead of CV. One reason for the decline could be because the new model is not doing cross validation, so it is not running multiple models at once. Instead it is using bootstrapping statistics to generate the final model which turns out to not be as accurate. 
+
+#### The quality of model_3 is slightly better than the original one. By using kappa as the metric we get higher kappa and accuracy values, for a lower amount of trials. However, since kappa and accuracy are closely related when developing the model, the difference between the models can be viewed as negligible since the original model used accuracy as the determinant.
+```{r, include=FALSE}
+#15: Multiple Models
+
+### MODEL 2
+
+fitControl_2 <- trainControl(method = "optimism_boot",
+                          number = 15,
+                          returnResamp="all",
+                          classProbs = TRUE,
+                          allowParallel = TRUE)
+
+grid_2 <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(10,15,20,25,30), 
+                    .model="tree")
+
+set.seed(1984)
+salary_mdl_2 <- train(x=features,
+                y=target,
+                method="C5.0",
+                tuneGrid=grid_2,
+                trControl=fitControl_2)
+
+salary_mdl_2 
+
+
+### MODEL 3
+fitControl_3 <- trainControl(method = "repeatedcv",
+                          number = 10,
+                          repeats = 5, 
+                          returnResamp="all",
+                          classProbs = TRUE,
+                          allowParallel = TRUE)
+
+grid_3 <- expand.grid(.winnow = c(TRUE,FALSE), 
+                    .trials=c(10,15,20,25,30), 
+                    .model="tree")
+
+set.seed(1984)
+salary_mdl_3 <- train(x=features,
+                y=target,
+                method="C5.0",
+                tuneGrid=grid_3,
+                metric = "Kappa",
+                trControl=fitControl_3)
+
+salary_mdl_3
+```
+
+```{r, echo=FALSE}
+salary_mdl_2
+salary_mdl_3
+```
+
+
+### Predicting with test set
+#### The resulting matrix for the test data set exhibits similar patterns to the training data set. Accuracy and kappa remain around the same, with the true positive rate and false positive rate following suit. These leads me to the conclusion that the model as predicted by all the variables is good in predicting whether or not someone makes less or more than $50,000. Again, we would like the false positive rate to be lower, but with an extremely high sensitivity, the model still does a good job in predicting the salary of an individual.
+```{r, echo=FALSE}
+#16: Predicting with the test set  
+
+salary_pred_test = predict(salary_mdl_3,test, type= "raw")
+
+confusionMatrix(as.factor(salary_pred_test), 
+                as.factor(test$salary), 
+                dnn=c("Prediction", "Actual"), 
+                mode = "sens_spec")
+```
+
+### Recommendations
+#### Going through this process I realized that the variables given in the data set are really good predictors for whether or not someone makes more or less than $50,000. With the results I obtained, I would recommend this type of model be built for more specific salary ranges. For example, instead of just more or less than $50,000 we could split the category into <$25k, <$50k, <$75k, >$75k. Or we could divide the ranges based on tax brackets. Since the model does a decent job originally, trying to expand it like this could lead to more significant interpretations of the results. 
+
+
+### Questions
+#### The hardest part of this process was trying to determine which evaluation metric to use, and why some evaluation metrics yielded the results they did. For example, the models using kappa vs accuracy yielded very similar results, and it was hard to determine which model to use (although I eventually came to the conclusion that the difference is pretty much negligible). What I found the most interesting was the variable importance measure. It was interesting to see how often the model used certain variables to come up with the final model. This leads me to some questions I have. Why did occupation, education, marital-status, and age all have an 100 importance, and not hours per week or fnlweight? Another lingering question I have is why the model did so well in predicting true positives, but had a subpar false positive rate?

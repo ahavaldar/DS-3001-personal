@@ -1,0 +1,75 @@
+---
+title: "week4lab"
+author: "Akhil Havaldar"
+date: "9/15/2021"
+output: 
+  html_document:
+    toc: TRUE
+    theme: cerulean
+    toc_float: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, cache= TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(plotly)
+library(DT)
+
+```
+
+<img src ="dstrash.jpeg" alt="photo" width="400"/>
+
+[Article](https://onezero.medium.com/machine-learnings-crumbling-foundations-bd11efa22b0) was published on **August 19 to Medium**
+
+### Author Information
+Cory Doctorow is a science fiction author, activist, and blogger. He was born in Canada, became a British citizen and now lives in Burbank, California. 
+
+### Article Summary
+This article on machine learning tackles how the very foundations of machine learning are crumbling due to the treatment of data. Doctorow mentions how the task of cleaning data is very important, but is pushed aside to low-waged workers who are not compensated for the time-consuming task of cleaning data. The result being data that is not cleaned properly is being pumped into models and machines that are then used to make conclusions that hurt many groups of people. 
+
+### Media Links
+
+1. Doctorow's Twitter: [Twitter](https://twitter.com/doctorow)
+2. Doctorow's Blog: [Blog](https://pluralistic.net)
+3. Doctorow's Mailing List: [Mailing](https://pluralistic.net/plura-list)
+
+### Areas of Application
+There are many areas where the failure to clean data properly can have a devastating impact. Here are a few:
+
+1. Video Surveillance Systems
+2. Vaccine Efficacy
+3. Traffic Maps
+4. Fraud Detection
+5. Self Driving Cars
+
+### Related Articles and Discussion{.tabset}
+
+#### Doctorow's Other Articles
+
+1. [Proctorio’s awful reviews disappear down the memory hole](https://doctorow.medium.com/proctorios-awful-reviews-disappear-down-the-memory-hole-5eb3e11bdbaf)
+2. [India’s ‘toxic’ ed-tech giant](https://doctorow.medium.com/indias-toxic-ed-tech-giant-2e085e98ca7)
+
+#### My Thoughts
+The most important takeaway in my opinion is that we need to put money and resources into data cleaning. We often overlook the importance of data cleaning as the data we work with comes to us whenever we need it. We don't care to think about the process that comes with getting the data prepped and ready to use. We don't even know if the data is properly cleaned when it gets to us. By putting more resources into this task we can limit the errors that come with uncleaned data and achieve higher validity in results. 
+
+### Plot and Table{.tabset}
+
+#### Tooth Growth DT
+```{r, echo=FALSE}
+DT:: datatable(ToothGrowth)
+```
+
+#### USA Arrests
+```{r, echo=FALSE}
+arrests <- ggplot(USArrests, aes(x = Murder, y = Assault))+
+  geom_point(aes(color=UrbanPop))
+
+ggplotly(arrests)
+```
+

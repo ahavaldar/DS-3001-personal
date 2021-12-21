@@ -1,0 +1,184 @@
+---
+title: "NBA Scouting Report"
+author: "Akhil Havaldar"
+date: "10/13/2021"
+output: 
+  html_document:
+    toc: TRUE
+    theme: readable
+    toc_float: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# Loading in the libraries
+library(e1071)
+library(tidyverse)
+library(plotly)
+library(htmltools)
+library(devtools)
+library(caret)
+library(NbClust)
+library(dplyr)
+library(RColorBrewer)
+```
+
+```{r, include= FALSE}
+# Loading Data
+library(readr)
+salaries <- read_csv("~/DS 3001/DS-3001/data/nba_salaries_21.csv")
+stats <- read_csv("~/DS 3001/DS-3001/data/nba2020-21.csv")
+
+# Merging the datasets by player
+nba = inner_join(salaries, stats)
+nba <- rename(nba, SAL = `2020-21`)
+nba <- na.omit(nba)
+```
+
+```{r, include=FALSE}
+# Normalizing the data
+normalize <- function(x){
+ (x - min(x)) / (max(x) - min(x))
+}
+
+nba$Age <- as.character(nba$Age)
+
+abc <- names(select_if(nba, is.numeric))
+nba[abc] <- as_tibble(lapply(nba[abc], normalize))
+```
+
+### Choosing Variables via Correlation Matrix
+#### From the correlation matrix below, we will use Points (highest correlation), Games Started (one of the higher correlations), and Assists (another variable with higher correlation). The reason for not using FG or FGA is that it is too similar to the PTS variable. Also, the number of games a player starts is a good indicator of how easy it would be to get them from another team, and how good a player is (if they start a lot, the chances that they are a good player is higher). Assists is good to use because it takes into account a different part of the game and the player's contribution to their teammates success. 
+```{r, echo=FALSE}
+cor(nba[6:30], nba$SAL)
+```
+
+```{r, include=FALSE}
+# Create a new data table with the variables: Player, Salary (SAL), Points (PTS), Games Started (GS), and Assists (AST).
+
+nba2 <- nba[,c(1,2,7,25,30)]
+
+# Create a subset of the data with the variables to cluster against
+clust_data_nba = nba2[, c("PTS", "GS", "AST")]
+```
+
+### Elbow Method
+#### The elbow method recommends to use 2 clusters as can be seen by the "elbow" point in the graph.
+```{r, include=FALSE}
+explained_variance = function(data_in, k){
+  set.seed(1)
+  kmeans_obj = kmeans(data_in, centers = k, algorithm = "Lloyd", iter.max = 30)
+  var_exp = kmeans_obj$betweenss / kmeans_obj$totss
+  var_exp  
+}
+
+explained_var_nba = sapply(1:10, explained_variance, data_in = clust_data_nba)
+elbow_data_nba = data.frame(k = 1:10, explained_var_nba)
+```
+
+```{r, echo=FALSE}
+# Plotting the variances of the elbow method
+ggplot(elbow_data_nba, 
+       aes(x = k,  
+           y = explained_var_nba)) + 
+  geom_point(size = 4) +           
+  geom_line(size = 1) +            
+  xlab('k') + 
+  ylab('Inter-cluster Variance / Total Variance') + 
+  theme_light()
+```
+
+### NBClust Method
+#### NBClust recommends 2 clusters as well, so that is the amount of clusters we will use.
+```{r, include=FALSE}
+(nbclust_obj_nba = NbClust(data = clust_data_nba, method = "kmeans"))
+View(nbclust_obj_nba$Best.nc)
+freq_k_nba = nbclust_obj_nba$Best.nc[1,]
+freq_k_nba = data.frame(freq_k_nba)
+```
+
+```{r, echo=FALSE}
+ggplot(freq_k_nba,
+       aes(x = freq_k_nba)) +
+  geom_bar() +
+  scale_x_continuous(breaks = seq(0, 15, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 12, by = 1)) +
+  labs(x = "Number of Clusters",
+       y = "Number of Votes",
+       title = "Cluster Analysis")
+```
+
+### K-Means Algorithm{.tabset}
+```{r, include=FALSE}
+set.seed(1)
+kmeans_obj_nba = kmeans(clust_data_nba, centers = 2, 
+                        algorithm = "Lloyd")
+
+kmeans_obj_nba$cluster
+salary_clusters_nba = as.factor(kmeans_obj_nba$cluster)
+```
+#### Graph 1
+From this graph we can see a positive correlation between the amount of points scored and games started.
+```{r, echo=FALSE}
+ggplot(nba2, aes(x = PTS, 
+                            y = GS,
+                            shape = salary_clusters_nba)) + 
+  geom_point(size = 6) +
+  ggtitle("Points vs Games Started in the NBA") +
+  xlab("Points Scored") +
+  ylab("Games Started") +
+  scale_shape_manual(name = "Cluster", 
+                     labels = c("Cluster 1", "Cluster 2"),
+                     values = c("1", "2")) +
+  theme_light()
+```
+
+#### Graph 2
+From this graph, we can see that towards the bottom left the majority of low salary players reside. Whereas as we get further away from the origin, the high salary players appear more often.
+```{r, echo=FALSE}
+ggplot(nba2, aes(x = PTS, 
+                            y = GS,
+                            color = SAL,
+                            shape = salary_clusters_nba)) + 
+  geom_point(size = 6) +
+  ggtitle("PTS vs GS") +
+  xlab("Points") +
+  ylab("Games Started") +
+  scale_shape_manual(name = "Cluster", 
+                     labels = c("Cluster 1", "Cluster 2"),
+                     values = c("1", "2")) +
+  scale_color_gradient(low = "pink",high = "black") +
+  theme_light()
+
+```
+
+### Choosing Players to Sign
+```{r, include=FALSE}
+# Removing all non-alphanumeric terms
+nba2$Player <- gsub("[^[:alnum:]]", "", nba2$Player)
+```
+
+```{r, echo=FALSE}
+fig <- plot_ly(nba2, 
+               type = "scatter3d",
+               mode="markers",
+               symbol = ~salary_clusters_nba,
+               x = ~PTS, 
+               y = ~GS,
+               z = ~AST,
+               color = ~SAL,
+               colors = "Purples", 
+               text = ~paste('Player: ',Player,
+                             "Salary: ",SAL
+))
+fig
+```
+#### Based on 3 factors (points, assists, and games started), and salary, the 3 best players to sign would be Lou Williams, TJ McConnell, and Lamelo Ball. 
+
+#### Lou Williams has around average point production and assist production, but is extremely low in the amount of games started. On top of that, he is within the low cluster of salaries (in the bottom 20% of salaries). Considering these factors, he would be easy to steal, and contribute at a good average all while being cost efficient.
+
+#### TJ McConnell will not be the main point scorer. He will be the main assist man, making over 60% more than all other players. In addition to contributing heavily with assists, he is less than the bottom 1% of games started, and salary. This makes him easy to get from his current team, and will cost the team very little money upfront and in the long run.
+
+#### Lamelo Ball can do it all. He is better than 50% of the players in both points and assists. While contributing heavily on the offensive side of the floor, he also currently does not start many games for his current team (which is quite surprising given his stats). On top of that, he is in the bottom 20% of NBA salary, perfect for our budget. 
+

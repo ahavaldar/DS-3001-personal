@@ -1,0 +1,248 @@
+---
+title: "Class II Assignment"
+author: "Akhil Havaldar"
+date: "9/1/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+# Data Set 1
+```{r}
+nfl_dat <- read_csv("/Users/a8hav/Downloads/nfl2008_fga.csv")
+```
+## Question 1: Are there differences in the field goal distance by down for attempts in 2008?
+
+## Pseudocode 1
+    - Group by down
+    - calculate average distance per down
+    - arrange in order of descending avg distance
+
+## Single Line Version 1   
+```{r}
+# Group by down
+as.factor(nfl_dat$down)
+x1 <- group_by(nfl_dat, down)
+
+# Calculate averages
+x2 <- summarize(x1, count=n(), mean(distance))
+
+# Arrange by averages
+x3 <- arrange(x2, desc(`mean(distance)`))
+```
+## Piped Version 1
+```{r}
+as.factor(nfl_dat$down)
+x1 <- group_by(nfl_dat, down) %>%
+  summarize(count=n(), mean(distance)) %>%
+  arrange(desc(`mean(distance)`))
+```
+## Function 1
+```{r}
+avg_dist <- function(x){
+  a1 <- group_by(x, down) %>%
+    summarize(count=n(), mean(distance)) %>%
+    arrange(desc(`mean(distance)`))
+  print(a1)
+}
+
+avg_dist(nfl_dat)
+```
+
+## Question 2: Which kickers were the most successful in kicking field goals over 40 yards?
+
+## Pseudocode 2
+      - Group by kicker
+      - filter by FG attempts of over 40 yards
+      - count the number of attempts and makes
+      - calculate FG percentage for each kicker
+      
+## Single line 2
+```{r}
+x1 <- group_by(nfl_dat, name)
+x2 <- filter(x1, distance>40)
+x3 <- summarize(x2, attempts = n(), makes = sum(GOOD))
+x4 <- mutate(x3, fgpct = makes / attempts)
+x5 <- arrange(x4, desc(`fgpct`))
+
+```
+## Piped Version 2
+```{r}
+x1 <- group_by(nfl_dat, name) %>%
+  filter(distance>40) %>%
+  summarize(attempts = n(), makes = sum(GOOD)) %>%
+  mutate(fgpct = makes/attempts)%>%
+  arrange(desc(`fgpct`))
+```
+## Function 2
+```{r}
+fgpct <- function(x){
+  a1 <- group_by(x, name) %>%
+  filter(distance>40) %>%
+  summarize(attempts = n(), makes = sum(GOOD)) %>%
+  mutate(fgpct = makes/attempts)%>%
+  arrange(desc(`fgpct`))
+  
+  print(a1)
+}
+
+fgpct(nfl_dat)
+```
+
+
+## Data Set 2
+```{r}
+library(readr)
+beaches <- read_csv("~/DS 3001/DS-3001/data/beaches.csv")
+```
+## Question 1: Which months have higher levels of enterococci on average for temps greater than 25?
+
+## Pseudocode 1:
+      - Group by month
+      - filter by temps greater than 25
+      - calculate average enterococci 
+      - arrange by descending values
+      
+## Single line code 1
+```{r}
+x1 <- group_by(beaches, month_name)
+x2 <- filter(x1, temperature>25)
+x3 <- summarize(x2,mean = mean(enterococci))
+x4 <- arrange(x3, desc(mean))
+```
+
+## Piped Version 1:
+```{r}
+x1<-group_by(beaches, month_name)%>%
+  filter(temperature>25)%>%
+  summarize(mean=mean(enterococci))%>%
+  arrange(desc(mean))
+```
+## Function 1
+```{r}
+mean_entero <- function(x){
+  a1 <- group_by(x, month_name)%>%
+  filter(temperature>25)%>%
+  summarize(mean=mean(enterococci))%>%
+  arrange(desc(mean))
+  
+  print(a1)
+}
+
+mean_entero(beaches)
+```
+
+## Question 2: What year was rainfall the most prominent in Spring?
+
+## Pseudocode 2:
+    - group by year
+    - filter by spring
+    - calculate average rainfall
+    - sort by descending values
+
+## Single Line 2:
+```{r}
+x1 <- group_by(beaches, year)
+x2 <- filter(x1, season_name == "Spring")
+x3 <- summarize(x2, mean = mean(rainfall, na.rm = T))
+x4 <- arrange(x3, desc(mean))
+```
+
+## Piped Version 2:
+```{r}
+x1 <- group_by(beaches, year)%>%
+  filter(season_name == "Spring")%>%
+  summarize(mean = mean(rainfall, na.rm = T))%>%
+  arrange(desc(mean))
+```
+
+## Function 2:
+```{r}
+rain_mean <- function(x){
+  a1 <- group_by(x, year)%>%
+    filter(season_name == "Spring")%>%
+    summarize(mean = mean(rainfall, na.rm = T))%>%
+    arrange(desc(mean))
+  print(a1)
+}
+
+rain_mean(beaches)
+```
+
+## Data Set 3
+```{r}
+library(readr)
+wine <- read_csv("~/DS 3001/DS-3001/data/winequality-red-ddl.csv")
+names(wine)[1]<-"fixed_acidity"
+names(wine)[c(2,3)]<-c("vol_acid", "citric_acid")
+```
+## Question 1: Does the fixed acidity of wine impact how highly the wine is rated?
+
+## Pseudocode 1:
+      - Group by wine quality (text)
+      - calculate the average fixed acidity per each wine quality
+      - sort by descending values to determine rank
+
+## Single line 1:
+```{r}
+x1 <- group_by(wine, text_rank)
+x2 <- summarize(x1, mean = mean(fixed_acidity, na.rm=T))
+x3 <- arrange(x2, desc(mean))
+```
+## Piped Version 1: 
+```{r}
+x1<-group_by(wine, text_rank)%>%
+  summarize(mean = mean(fixed_acidity, na.rm=T))%>%
+  arrange(desc(mean))
+  
+```
+## Function 1:
+```{r}
+fixed_acid_avg <- function(x){
+  a1 <- group_by(x, text_rank)%>%
+    summarize(mean = mean(fixed_acidity,na.rm=T))%>%
+    arrange(desc(mean))
+  print(a1)
+}
+fixed_acid_avg(wine)
+```
+
+## Question 2: For high quality wines, is citric acid or volatility acid higher on average?
+
+## Pseudocode 2:
+      - Select only the "excellent" wines
+      - average the volatility acid
+      - average the citric acid
+      - merge the datasets
+      
+## Single Line 2:
+```{r}
+x1 <- filter(wine, text_rank == "excellent")
+x2 <- summarize(x1, mean_vol = mean(vol_acid))
+x3 <- summarize(x1, mean_cit = mean(citric_acid))
+x4 <- merge(x2, x3)
+
+```
+## Piped Version 2: 
+```{r}
+x1 <- filter(wine, text_rank == "excellent")%>%
+  summarize(mean_vol = mean(vol_acid))
+x2<- filter(wine, text_rank == "excellent")%>%
+  summarize(mean_cit = mean(citric_acid))
+x3<-merge(x1, x2)
+```
+
+## Function 2:
+```{r}
+func <- function(x){
+  a1 <- filter(x, text_rank == "excellent")%>%
+    summarize(mean_vol = mean(vol_acid))
+  a2 <- filter(x, text_rank == "excellent")%>%
+  summarize(mean_cit = mean(citric_acid))
+  a3 <- merge(a1, a2)
+  print(a3)
+}
+func(wine)
+```
+

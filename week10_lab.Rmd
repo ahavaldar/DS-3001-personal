@@ -1,0 +1,151 @@
+---
+title: "week10_lab"
+author: "Akhil Havaldar"
+date: "10/27/2021"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(RColorBrewer)
+library(data.table)
+library(ROCR)
+library(mltools)
+library(MLmetrics)
+```
+
+```{r}
+### Parts 1 and 2
+
+### With the wine dataset, we are trying to answer the question "is the wine good enough to be sold to a restaurant". A 1 will be displayed if it is good enough and a 0 if it is not good enough to be sold. 
+
+### Based on this question, three good metrics to be tracked throughout the process are the true positive rate (sensitivity), the false positive rate (1-specificity), and kappa. We should track the TPR because we will need a very high percentage to be classified correctly in order to make sure we are selling restaurants true high quality wine. On top of that, we will need a low FPR so we don't get into trouble by the restaurants for selling them low quality wine which our model predicted was high quality. Kappa is a good metric to track because we want a model that is performing much higher than a model who would just randomly guess according to the class frequency. 
+```
+
+```{r}
+### Data Prep
+
+wine <- read_csv("~/DS 3001/DS-3001/data/winequality-red-ddl.csv")
+
+wine <- wine[,-13]
+wine <- wine[complete.cases(wine),]
+wine$quality <- recode(wine$quality,
+                       '3'=0,'4'=0,'5'=0,
+                       '6'=1,'7'=1,'8'= 1) 
+
+wine$quality <- as.factor(wine$quality)
+
+scaledwine <- as.data.frame(scale(wine[1:11], center = TRUE, scale = TRUE)) 
+
+wine2 <- wine[,12]
+wine3 <- cbind(scaledwine, wine2)
+
+
+```
+
+```{r}
+### Part 3: Running KNN
+set.seed(1000)
+
+wine_sample <- sample(2, nrow(scaledwine), replace=TRUE, prob=c(0.67, 0.33))
+
+wine_training_car <- wine3[wine_sample==1, 1:12]
+wine_test_car <- wine3[wine_sample==2, 1:12]
+
+
+trctrl <- trainControl(method = "repeatedcv",
+                       number = 10,
+                       repeats = 3)
+
+wine_knn <- train(quality~.,
+                  data = wine_training_car,
+                  method="knn",
+                  tuneLength=10,
+                  trControl= trctrl,
+                  preProcess="scale")
+
+wine_knn
+
+plot(wine_knn)
+varImp(wine_knn)
+
+wine_pred <- predict(wine_knn, wine_test_car)
+wine_pred
+
+confusionMatrix(wine_pred, wine_test_car$quality)
+
+### From this confusion matrix, we can evaluate the performance of our model based on the metrics specified earlier. First, we have a TPR of around 72%, and a FPR of around 26%. The FPR value of the model is actually quite good, only misclassifying around 22% of the time. Our TPR is also pretty good at 72%, but if we are selling to top end, Michelin star restaurants, a higher TPR would be needed. Our kappa value turns out to be 0.47 which is a pretty moderate agreement. Adding an accuracy of 74%, our model seems to be doing an ok job of predicting whether or not wine is good enough to be sold. 
+```
+
+```{r}
+### ROC
+wine_eval <- (predict(wine_knn, newdata= wine_test_car))
+wine_eval_prob <- predict(wine_knn, newdata= wine_test_car, type="prob")
+
+wine_eval <- tibble(pred_class=wine_eval, pred_prob=wine_eval_prob$`1`, target=as.numeric(wine_test_car$quality))
+
+wine_pred <- prediction(wine_eval$pred_prob, wine_eval$target)
+wine_tree_perf <- performance(wine_pred, "tpr", "fpr")
+
+plot(wine_tree_perf, colorize=TRUE)
+
+### This ROC graph shows that the model is actually not too bad, which is counter to what the confusion matrix output determined. 
+```
+```{r}
+### Log Loss
+
+LogLoss(as.numeric(wine_eval$pred_prob), as.numeric(wine_test_car$quality))
+
+### The log loss value of -1.037 is actually really bad since we want this number as close to 0 as possible. This means there is quite a bit of uncertainty in this model. 
+```
+
+```{r}
+### F1 Score
+
+wine_pred_1 <- ifelse(wine_eval_prob$`1` < 0.5, 0, 1)
+
+View(wine_pred_1)
+
+
+wine_eval_prob$quality <- wine_test_car$quality
+
+F1_Score(y_pred = wine_pred_1, y_true = wine_eval_prob$quality, positive = "1")
+
+
+### With an F1 Score of 0.72, the model is not completely perfect, but is doing pretty well in that there are low false positives, and low false negatives. 
+```
+
+```{r}
+### Part 4
+
+### The misclassifications seem to be be even among the false positives and false negatives. Looking at the variable importance measure, alcohol has a 100 importance, which means it is directly predicting the outcome. This could be where most of the misclassifications are coming from since a variable that has 100 importance could be severly skewing the final predictions. 
+```
+
+```{r}
+### Part 5: Adjusting the Threshold
+
+adjust_thres <- function(x, y, z) {
+  thres <- as.factor(ifelse(x > y, 1,0))
+  confusionMatrix(thres, z, positive = "1", dnn=c("Prediction", "Actual"), mode = "everything")
+}
+
+adjust_thres(wine_eval_prob$`1`,.8, wine_test_car$quality)
+adjust_thres(wine_eval_prob$`1`,.3, wine_test_car$quality)
+
+### When the threshold changes to 0.80, we see a very large drop off in the TPR and a decrease in the FPR. This is intuitively correct because we are increasing the threshold for classifying 1's which means we could get a much lower true positive rate. In context, this means that we are much less likely to sell wine to restaurants that are in fact good to be sold. We would lose out on a lot of money if our threshold was this high. Our kappa value also has a significant decrease, meaning that there is a fair agreement rather than a moderate agreement like we got in the first confusion matrix. 
+ 
+
+### A threshold of 0.30 on the other hand, dramatically increases the TPR, but also increases the FPR. Following similar logic as with a 0.80 threshold, the sensitivity is extremely high in this case meaning a high TPR, but the trade off is a very high FPR. In context, we would not lose out on any money as we are basically selling everything to restaurants, but we will most likely not be selling to these restaurants in the future as we would have sold them low quality wine instead of high quality wine. Our kappa value also decreases by quite a bit. 
+
+```
+
+```{r}
+### Part 6: Summary and Recommendations
+
+### After going through all the results, I can conclude that this model does an decent job at predicting whether or not wine should be sold based on the quality. The model has a relatively high TPR and relatively low FPR resulting in majority correct predictions of wine quality. This means we can sell to restaurants without worry of a large amount of backlash. The accuracy of the model is ok, hovering around 74%. The model also boasts a decent kappa value and high F1 score, which is another indicator of a decent model. Despite all of these good results, the model does have a downfall. The log loss value of 1.037 is extremely poor, meaning that the model is heavily penalized for classifications that are highly confident in the wrong direction. If this value was closer to 0, the implementability of the model would be greater. 
+
+### With regards to recommendations, I would first eliminate the alcohol variable. Since this variable has a 100 importance, it could be drastically skewing the results/causing the misclassifications of the quality of wine. Removing this variable should hopefully reduce the FPR and increase the TPR. I would also recommend researching and adding new variables to predict the quality of wine. By doing this, I anticipate the variable importance measure to be evenly spread out among all the variables, resulting in a better and more accurate model. As always, more data would not hurt, it would just increase the amount of predictions we get in the end.
+```
+
